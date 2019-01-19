@@ -1,0 +1,16 @@
+{application, processes,
+ [{description, "A very large process simulation showing off Erlang's process handling"},
+  {vsn, "0.1.0"},
+  {registered, []},
+  {mod, { processes_app, []}},
+  {applications, 
+   [kernel,
+    stdlib
+   ]},
+  {env,[]},
+  {modules, []},
+
+  {maintainers, []},
+  {licenses, ["Creative Commons Attribution (CC BY)"]},
+  {links, []}
+ ]}.
