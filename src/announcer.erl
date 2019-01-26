@@ -29,23 +29,18 @@
 -define(SENT_RECEIVED_TABLE, sent_received_table).
 
 -record(state, {
-    total_received = 0 :: non_neg_integer(),
-    total_sent = 0 :: non_neg_integer(),
+    previous_received = 0 :: non_neg_integer(),
+    previous_sent = 0 :: non_neg_integer(),
     last_n = {[], []} :: {list(non_neg_integer()), list(non_neg_integer())}
-}).
-
--record(record_entry, {
-    who      = undefined :: pid(),
-    received = 0         :: non_neg_integer(),
-    sent     = 0         :: non_neg_integer()
 }).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 
-report(Who, Received, Sent) ->
-    ets:insert(?SENT_RECEIVED_TABLE, #record_entry{who = Who, received = Received, sent = Sent}).
+report(_Who, Received, Sent) ->
+    ets:update_counter(?SENT_RECEIVED_TABLE, received, Received, {received, 0}),
+    ets:update_counter(?SENT_RECEIVED_TABLE, sent, Sent, {sent, 0}).
 
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
@@ -55,18 +50,7 @@ start_link() ->
 %%%===================================================================
 
 init([]) ->
-    % Note: 99.9% of the time when creating an ETS table that you plan to put records in, you specify {keypos, ...} as
-    % one of the options.  That indicates which position in the tuple is the key for the items in the table.  That is
-    % done here.  This ETS table is a duplicate_bag, meaning it's just a bunch of entries which may have the same key
-    % and there may be duplicates of entries.  If the keypos is not specified it defaults to 1 (the first entry in the
-    % tuple).  The record that gets inserted is a record_entry (search this file for that).  The record syntax is
-    % actually just syntactical sugar and the record #record_entry{who=A, received=B, sent=C} just gets converted to
-    % {record_entry, who, received, sent}.
-    %
-    % With the keypos = 1, then each item in the ETS table will have the key 'record_entry'.  This is intentional.  This
-    % allows ets:take/2 to get and delete all of the entries in the table in a single atomic call, ensuring that every
-    % single message that was sent or received is accounted for.
-    ets:new(?SENT_RECEIVED_TABLE, [named_table, duplicate_bag, public, {write_concurrency, true}]),
+    ets:new(?SENT_RECEIVED_TABLE, [named_table, set, public, {write_concurrency, true}]),
     timer:send_interval(?ANNOUNCE_DELAY, announce),
     {ok, #state{}}.
 
@@ -76,20 +60,20 @@ handle_call(_Request, _From, State) ->
 handle_cast(_Request, State) ->
     {noreply, State}.
 
-handle_info(announce, #state{total_received = TotalReceived,
-                             total_sent = TotalSent,
+handle_info(announce, #state{previous_received = PreviousReceived,
+                             previous_sent = PreviousSent,
                              last_n = {LastNSent, LastNReceived}} = State) ->
-    % Use ets:take/2 to get all of the records in the SENT_RECEIVED_TABLE.  Sum them up in a single fold.
-    {Received, Sent} = lists:foldl(
-        fun (#record_entry{sent = RecordSent, received = RecordReceived}, {R, S}) ->
-            {R + RecordReceived, S + RecordSent}
-        end,
-        {0, 0},
-        ets:take(?SENT_RECEIVED_TABLE, record_entry)
-    ),
 
-    NewTotalReceived = TotalReceived + Received,
-    NewTotalSent = TotalSent + Sent,
+    {LatestReceived, LatestSent} = try
+        [{received, InnerLatestReceived}, {sent, InnerLatestSent}] = lists:sort(ets:tab2list(?SENT_RECEIVED_TABLE)),
+        {InnerLatestReceived, InnerLatestSent}
+    catch
+        _:_  ->
+            {0, 0}
+    end,
+
+    Received = LatestReceived - PreviousReceived,
+    Sent = LatestSent - PreviousSent,
 
     NewLastSent = append_with_max_length(Sent, LastNSent, ?MOVING_AVERAGE_QUANTITY),
     NewLastReceived = append_with_max_length(Received, LastNReceived, ?MOVING_AVERAGE_QUANTITY),
@@ -100,12 +84,12 @@ handle_info(announce, #state{total_received = TotalReceived,
     if
         Sent + Received > 0 ->
             io:format("Recv'd: ~p, sent: ~p.  MovAvg(~p): Recv'd: ~p, sent: ~p.  Total recv'd: ~p, sent: ~p.~n",
-                [Received, Sent, ?MOVING_AVERAGE_QUANTITY, ReceivedMovingAverage, SentMovingAverage, NewTotalReceived, NewTotalSent]);
+                [Received, Sent, ?MOVING_AVERAGE_QUANTITY, ReceivedMovingAverage, SentMovingAverage, LatestReceived, LatestSent]);
         true ->
             ok
     end,
 
-    {noreply, State#state{total_received = NewTotalReceived, total_sent = NewTotalSent, last_n = {NewLastSent, NewLastReceived}}};
+    {noreply, State#state{previous_received = LatestReceived, previous_sent = LatestSent, last_n = {NewLastSent, NewLastReceived}}};
 handle_info(_Info, State) ->
     {noreply, State}.
 
