@@ -10,6 +10,7 @@
 -author("mbenza").
 
 -behaviour(gen_server).
+-define(SEND_INTERVAL, 1000).
 
 %% API
 -export([start_link/1]).
@@ -67,7 +68,8 @@ handle_cast(_Request, State) ->
     {noreply, State}.
 
 handle_info(chat, #state{destinations = Destinations, messages_received = Received} = State) ->
-    erlang:send_after(1000, self(), chat),
+    % Interestingly, the timing is more stable with erlang:send_after/3 every time than it is with timer:send_interval/2
+    erlang:send_after(?SEND_INTERVAL, self(), chat),
     lists:foreach(fun send_message/1, Destinations),
     report_stats(Received, length(Destinations)),
     NewState = update_state(State),
