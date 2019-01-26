@@ -23,8 +23,6 @@
 %%% API functions
 %%%===================================================================
 
--spec(start_link() ->
-    {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
 start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
@@ -32,13 +30,6 @@ start_link() ->
 %%% Supervisor callbacks
 %%%===================================================================
 
--spec(init(Args :: term()) ->
-    {ok, {SupFlags :: {RestartStrategy :: supervisor:strategy(),
-        MaxR :: non_neg_integer(), MaxT :: non_neg_integer()},
-        [ChildSpec :: supervisor:child_spec()]
-    }} |
-    ignore |
-    {error, Reason :: term()}).
 init([]) ->
     RestartStrategy = simple_one_for_one,
     MaxRestarts = 1000,
@@ -54,7 +45,3 @@ init([]) ->
         Restart, Shutdown, Type, ['child']},
 
     {ok, {SupFlags, [AChild]}}.
-
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================

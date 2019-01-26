@@ -26,13 +26,12 @@ start_link() ->
 %% Supervisor callbacks
 %%====================================================================
 
-%% Child :: {Id,StartFunc,Restart,Shutdown,Type,Modules}
 init([]) ->
     % Supervisor structure:
     % processes_sup (one for one)
-    % - record_srv
-    % - report_srv
-    % - children_sup (simple one for okne)
+    % - process_manager
+    % - announcer
+    % - children_sup (simple one for one)
     %   - child
     Children = [
         {process_manager, {process_manager, start_link, []}, permanent, 6000, worker, [process_manager]},

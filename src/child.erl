@@ -39,8 +39,6 @@
 %%% API
 %%%===================================================================
 
--spec(start_link(Id :: non_neg_integer()) ->
-    {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
 start_link(Id) ->
     gen_server:start_link({local, binary_to_atom(list_to_binary(io_lib:format("~p_~p", [?SERVER, Id])), utf8)}, ?MODULE, [Id], []).
 
@@ -48,45 +46,26 @@ start_link(Id) ->
 %%% gen_server callbacks
 %%%===================================================================
 
--spec(init([Id ::non_neg_integer()]) ->
-    {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
-    {stop, Reason :: term()} | ignore).
 init([Id]) ->
     InitialDelay = trunc(rand:uniform() * 1000),
     gen_server:cast(self(), get_destinations),
     erlang:send_after(InitialDelay, self(), chat),
-    Cycles  = trunc(rand:uniform() * 45) + 5,
+    Cycles  = trunc(rand:uniform() * 40) + 10,
     Settings = #{
         check_up_cycles => Cycles,
         n_destinations => 5
     },
     {ok, #state{id = Id, settings = Settings, cycles_remaining = Cycles}}.
 
--spec(handle_call(Request :: term(), From :: {pid(), Tag :: term()},
-    State :: #state{}) ->
-    {reply, Reply :: term(), NewState :: #state{}} |
-    {reply, Reply :: term(), NewState :: #state{}, timeout() | hibernate} |
-    {noreply, NewState :: #state{}} |
-    {noreply, NewState :: #state{}, timeout() | hibernate} |
-    {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
-    {stop, Reason :: term(), NewState :: #state{}}).
 handle_call(Request, _From, State) ->
     {reply, {error, {invalid_message, Request}}, State}.
 
--spec(handle_cast(Request :: term(), State :: #state{}) ->
-    {noreply, NewState :: #state{}} |
-    {noreply, NewState :: #state{}, timeout() | hibernate} |
-    {stop, Reason :: term(), NewState :: #state{}}).
 handle_cast(get_destinations, #state{settings = #{n_destinations := NDestinations}} = State) ->
     {ok, Destinations} = process_manager:get_n_siblings(NDestinations),
     {noreply, State#state{destinations = Destinations}};
 handle_cast(_Request, State) ->
     {noreply, State}.
 
--spec(handle_info(Info :: timeout() | term(), State :: #state{}) ->
-    {noreply, NewState :: #state{}} |
-    {noreply, NewState :: #state{}, timeout() | hibernate} |
-    {stop, Reason :: term(), NewState :: #state{}}).
 handle_info(chat, #state{destinations = Destinations, messages_received = Received} = State) ->
     erlang:send_after(1000, self(), chat),
     lists:foreach(fun send_message/1, Destinations),
@@ -99,14 +78,9 @@ handle_info({mail, #{from := _From, message := _Ref}}, #state{messages_received 
 handle_info(_Info, State) ->
     {noreply, State}.
 
--spec(terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
-    State :: #state{}) -> term()).
 terminate(_Reason, _State) ->
     ok.
 
--spec(code_change(OldVsn :: term() | {down, term()}, State :: #state{},
-    Extra :: term()) ->
-    {ok, NewState :: #state{}} | {error, Reason :: term()}).
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 

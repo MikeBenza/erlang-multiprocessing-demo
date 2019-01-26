@@ -53,21 +53,8 @@ get_n_siblings(N) when is_integer(N) ->
         _ ->
             Ids = [rand:uniform(Size) - 1 || _ <- lists:seq(1, N)],
             Entries = [hd(ets:lookup(?PROCESSES_TABLE, Id)) || Id <- Ids],
-%            io:format("Entries: ~p~n", [Entries]),
             {ok, [Pid || #proc_table_entry{pid=Pid} <- Entries]}
     end.
-%get_n_siblings(N) when is_integer(N) ->
-%    AllProcs = ets:tab2list(?PROCESSES_TABLE),
-%    R = case AllProcs of
-%        [] ->
-%            [];
-%        [{P}] ->
-%            [P || _ <- lists:seq(1, N)];
-%        _ ->
-%            Rows = [lists:nth(crypto:rand_uniform(1, length(AllProcs) + 1), AllProcs) || _ <- lists:seq(1, N)],
-%            [Pid || {Pid} <- Rows]
-%    end,
-%    {ok, R}.
 
 get_settings() ->
     #{
@@ -75,14 +62,6 @@ get_settings() ->
         n_destinations => 5
     }.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Starts the server
-%%
-%% @end
-%%--------------------------------------------------------------------
--spec(start_link() ->
-    {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
@@ -90,39 +69,9 @@ start_link() ->
 %%% gen_server callbacks
 %%%===================================================================
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Initializes the server
-%%
-%% @spec init(Args) -> {ok, State} |
-%%                     {ok, State, Timeout} |
-%%                     ignore |
-%%                     {stop, Reason}
-%% @end
-%%--------------------------------------------------------------------
--spec(init(Args :: term()) ->
-    {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
-    {stop, Reason :: term()} | ignore).
 init([]) ->
     ets:new(?PROCESSES_TABLE, [named_table, set, protected, {read_concurrency, true}, {keypos, #proc_table_entry.id}]),
     {ok, #state{}}.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Handling call messages
-%%
-%% @end
-%%--------------------------------------------------------------------
--spec(handle_call(Request :: term(), From :: {pid(), Tag :: term()},
-    State :: #state{}) ->
-    {reply, Reply :: term(), NewState :: #state{}} |
-    {reply, Reply :: term(), NewState :: #state{}, timeout() | hibernate} |
-    {noreply, NewState :: #state{}} |
-    {noreply, NewState :: #state{}, timeout() | hibernate} |
-    {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
-    {stop, Reason :: term(), NewState :: #state{}}).
 
 handle_call({start_n_processes, N}, _From, #state{processes = Processes} = State) ->
     try

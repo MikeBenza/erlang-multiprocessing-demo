@@ -11,7 +11,8 @@
 
 -behaviour(gen_server).
 
--define(ANNOUNCE_DELAY, 3000).
+-define(ANNOUNCE_DELAY, 1000).
+-define(MOVING_AVERAGE_QUANTITY, 10).
 
 %% API
 -export([start_link/0, report/3]).
@@ -29,7 +30,8 @@
 
 -record(state, {
     total_received = 0 :: non_neg_integer(),
-    total_sent = 0 :: non_neg_integer()
+    total_sent = 0 :: non_neg_integer(),
+    last_n = {[], []} :: {list(non_neg_integer()), list(non_neg_integer())}
 }).
 
 -record(record_entry, {
@@ -45,14 +47,6 @@
 report(Who, Received, Sent) ->
     ets:insert(?SENT_RECEIVED_TABLE, #record_entry{who = Who, received = Received, sent = Sent}).
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Starts the server
-%%
-%% @end
-%%--------------------------------------------------------------------
--spec(start_link() ->
-    {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
@@ -60,20 +54,6 @@ start_link() ->
 %%% gen_server callbacks
 %%%===================================================================
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Initializes the server
-%%
-%% @spec init(Args) -> {ok, State} |
-%%                     {ok, State, Timeout} |
-%%                     ignore |
-%%                     {stop, Reason}
-%% @end
-%%--------------------------------------------------------------------
--spec(init(Args :: term()) ->
-    {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
-    {stop, Reason :: term()} | ignore).
 init([]) ->
     % Note: 99.9% of the time when creating an ETS table that you plan to put records in, you specify {keypos, ...} as
     % one of the options.  That indicates which position in the tuple is the key for the items in the table.  That is
@@ -87,34 +67,18 @@ init([]) ->
     % allows ets:take/2 to get and delete all of the entries in the table in a single atomic call, ensuring that every
     % single message that was sent or received is accounted for.
     ets:new(?SENT_RECEIVED_TABLE, [named_table, duplicate_bag, public, {write_concurrency, true}]),
-    erlang:send_after(1000, self(), announce),
+    timer:send_interval(?ANNOUNCE_DELAY, announce),
     {ok, #state{}}.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Handling call messages
-%%
-%% @end
-%%--------------------------------------------------------------------
--spec(handle_call(Request :: term(), From :: {pid(), Tag :: term()},
-    State :: #state{}) ->
-    {reply, Reply :: term(), NewState :: #state{}} |
-    {reply, Reply :: term(), NewState :: #state{}, timeout() | hibernate} |
-    {noreply, NewState :: #state{}} |
-    {noreply, NewState :: #state{}, timeout() | hibernate} |
-    {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
-    {stop, Reason :: term(), NewState :: #state{}}).
 handle_call(_Request, _From, State) ->
     {noreply, State}.
-
 
 handle_cast(_Request, State) ->
     {noreply, State}.
 
-handle_info(announce, #state{total_received = TotalReceived, total_sent = TotalSent} = State) ->
-    erlang:send_after(?ANNOUNCE_DELAY, self(), announce),
-
+handle_info(announce, #state{total_received = TotalReceived,
+                             total_sent = TotalSent,
+                             last_n = {LastNSent, LastNReceived}} = State) ->
     % Use ets:take/2 to get all of the records in the SENT_RECEIVED_TABLE.  Sum them up in a single fold.
     {Received, Sent} = lists:foldl(
         fun (#record_entry{sent = RecordSent, received = RecordReceived}, {R, S}) ->
@@ -127,15 +91,21 @@ handle_info(announce, #state{total_received = TotalReceived, total_sent = TotalS
     NewTotalReceived = TotalReceived + Received,
     NewTotalSent = TotalSent + Sent,
 
+    NewLastSent = append_with_max_length(Sent, LastNSent, ?MOVING_AVERAGE_QUANTITY),
+    NewLastReceived = append_with_max_length(Received, LastNReceived, ?MOVING_AVERAGE_QUANTITY),
+
+    SentMovingAverage = lists:sum(NewLastSent) / min(?MOVING_AVERAGE_QUANTITY, length(NewLastSent)),
+    ReceivedMovingAverage = lists:sum(NewLastReceived) / min(?MOVING_AVERAGE_QUANTITY, length(NewLastReceived)),
+
     if
         Sent + Received > 0 ->
-            io:format("*** Received: ~p.  Sent: ~p.  Total received: ~p.  Total sent: ~p~n",
-                [Received, Sent, NewTotalReceived, NewTotalSent]);
+            io:format("Recv'd: ~p, sent: ~p.  MovAvg(~p): Recv'd: ~p, sent: ~p.  Total recv'd: ~p, sent: ~p.~n",
+                [Received, Sent, ?MOVING_AVERAGE_QUANTITY, ReceivedMovingAverage, SentMovingAverage, NewTotalReceived, NewTotalSent]);
         true ->
             ok
     end,
 
-    {noreply, State#state{total_received = NewTotalReceived, total_sent = NewTotalSent}};
+    {noreply, State#state{total_received = NewTotalReceived, total_sent = NewTotalSent, last_n = {NewLastSent, NewLastReceived}}};
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -143,3 +113,6 @@ terminate(_Reason, _State) ->
     ok.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
+
+append_with_max_length(New, Previous, MaxLength) when is_list(Previous), is_integer(MaxLength) ->
+    [New | lists:sublist(Previous, MaxLength - 1)].
